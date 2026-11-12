@@ -72,22 +72,38 @@ def test_day_summary():
     assert [h["text"] for h in hits] == [p1]
     assert day_summary.search(db, "薄荷", embed=fake_embed, exclude={hits[0]["id"]}) == []
     assert "[09:00] 小满：第0句" in day_summary.read_day(db, "c", "2026-11-01", 0, NAMES)
+    # 事后改了切段规则、又补进一句：出处还指着这份总结当初读的那几句
+    gap, day_summary.GAP = day_summary.GAP, timedelta(days=1)
+    store.add_message(db, "c", "user", "后来补的一句", T0 + timedelta(hours=6))
+    seg1 = day_summary.read_day(db, "c", "2026-11-01", 1, NAMES)
+    day_summary.GAP = gap
+    assert seg1.startswith("[13:10] 小满：第0句") and "后来补的" not in seg1
+    assert day_summary.read_day(db, "c", "2026-11-01", 2, NAMES) == "这一段不存在。"
 
 
-def test_gate():
+def test_pick():
     cands = [
-        {"id": "a", "text": "小满在阳台种了一盆薄荷", "sim": 0.58, "rank": 1},
-        {"id": "b", "text": "周末去海边", "sim": 0.64, "rank": 2},
-        {"id": "c", "text": "芝麻打翻了水杯", "sim": 0.55, "rank": 3},
-        {"id": "d", "text": "阳台的薄荷又长高了", "sim": 0.61, "rank": 4, "archived": True},
+        {"id": "a", "text": "小满在阳台种了一盆薄荷", "rank": 1, "day": "2026-11-01", "seg": 0},
+        {"id": "b", "text": "周末去海边", "rank": 2},
+        {"id": "c", "text": "芝麻打翻了水杯", "rank": 3},
+        {"id": "d", "text": "阳台的薄荷又长高了", "rank": 4, "archived": True},
+        {"id": "a", "text": "小满在阳台种了一盆薄荷", "rank": 5},
     ]
-    got = recall_gate.gate("阳台那盆薄荷还好吗", cands, recent_ids={"z"})
-    assert [c["id"] for c in got] == ["b"]  # a 字面重合但相似度不够 0.60；b 靠向量
-    assert [c["fate"] for c in cands] == ["NO_SEMANTIC_SIGNAL", "VECTOR", "NO_SEMANTIC_SIGNAL", "ARCHIVED"]
-    cands[0]["sim"] = 0.61
-    assert recall_gate.gate("阳台那盆薄荷还好吗", cands)[0]["fate"] == "LEXICAL"
-    assert recall_gate.gate("阳台那盆薄荷还好吗", cands, recent_ids={"a", "b"}) == []
-    assert not recall_gate.lexical_anchor("我们今天", "我们今天也很好")  # 只有口头禅重合不算
+    seen = []
+
+    def judge(messages, **kw):
+        seen.append(messages[1]["content"])
+        return "[1, 1, 9]"  # 重复的、越界的编号都丢掉
+
+    got, ok = recall_gate.pick("阳台那盆薄荷还好吗", cands, NAMES, prev="今天天气不错", recent_ids={"b"}, chat=judge)
+    assert ok and [c["id"] for c in got] == ["a"]
+    assert [c["fate"] for c in cands] == ["PICKED", "RECENTLY_SHOWN", "NOT_PICKED", "ARCHIVED", "DUPLICATE"]
+    assert seen[0].startswith("阿砚上一句（结尾）：今天天气不错\n小满现在说：") and "2. 芝麻" in seen[0]
+    assert 'from="2026-11-01 第 0 段"' in recall_gate.render(got)
+
+    assert recall_gate.pick("在吗", cands[:2], NAMES, chat=lambda m, **kw: "[]") == ([], True)
+    for broken in (lambda m, **kw: "我觉得都不太相关", lambda m, **kw: (_ for _ in ()).throw(llm.Truncated)):
+        assert recall_gate.pick("在吗", cands[:2], NAMES, chat=broken) == ([], False)
     assert "unavailable" in recall_gate.render([], unavailable=True)
 
 

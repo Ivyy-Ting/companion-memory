@@ -1,4 +1,4 @@
-"""日总结：每天按段总结，一件事一个向量。总结只是索引，要细节回去翻原话。"""
+"""日总结：每天按段总结，一件事一个向量。总结只是索引，原话才是证据，要细节回去翻原话。"""
 import struct
 from datetime import datetime, timedelta
 
@@ -76,7 +76,9 @@ def summarize_day(db, conv, day, names, chat=llm.chat, embed=llm.embed):
         ).strip()
         if not text:
             continue  # 失败不覆盖旧的好总结
-        db.execute("INSERT OR REPLACE INTO day_summaries VALUES (?,?,?,?)", (conv, day, i, text))
+        # 记下这段原话的 id 范围：以后当天补进消息、切段规则变了，总结也还指着它当初读的那几句
+        db.execute("INSERT OR REPLACE INTO day_summaries VALUES (?,?,?,?,?,?)",
+                   (conv, day, i, text, seg[0]["id"], seg[-1]["id"]))
         db.execute("DELETE FROM chunks WHERE conv=? AND day=? AND seg=?", (conv, day, i))
         if text != "无":
             parts = split_chunks(text)
@@ -105,13 +107,17 @@ def search(db, query, embed=llm.embed, k=TOP_K, min_sim=MIN_SIM, exclude=()):
 
 
 def read_day(db, conv, day, seg, names):
-    """给模型的工具：按日期和段号翻回原话。"""
-    segs = segments(day_messages(db, conv, day))
-    return transcript(segs[seg], names)[:READ_CAP] if seg < len(segs) else "这一段不存在。"
+    """给模型的工具：按日期和段号翻回这份总结当初读的原话。"""
+    r = db.execute("SELECT first_id, last_id FROM day_summaries WHERE conv=? AND day=? AND seg=?",
+                   (conv, day, seg)).fetchone()
+    if not r:
+        return "这一段不存在。"
+    msgs = db.execute("SELECT * FROM messages WHERE conv=? AND id BETWEEN ? AND ? ORDER BY id", (conv, *r))
+    return transcript(msgs, names)[:READ_CAP]
 
 
 def render(hits):
     if not hits:
         return ""
     lines = "\n".join(f'- {c["day"]} 第 {c["seg"]} 段：{c["text"]}' for c in hits)
-    return f"<day_summary_recall>\n{lines}\n（这些是日总结，只是索引；要细节就用 read_day 翻原话。）\n</day_summary_recall>"
+    return f"<day_summary_recall>\n{lines}\n（这些是日总结，只是索引；要细节就用 read_day 翻原话，对不上以原话为准。）\n</day_summary_recall>"

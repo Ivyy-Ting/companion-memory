@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS capsules (
   start_at TEXT NOT NULL, end_at TEXT NOT NULL, text TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS day_summaries (
-  conv TEXT, day TEXT, seg INTEGER, text TEXT NOT NULL, PRIMARY KEY (conv, day, seg)
+  conv TEXT, day TEXT, seg INTEGER, text TEXT NOT NULL,
+  first_id INTEGER NOT NULL, last_id INTEGER NOT NULL,  -- 这份总结是从哪几条原话写的
+  PRIMARY KEY (conv, day, seg)
 );
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY, conv TEXT, day TEXT, seg INTEGER,

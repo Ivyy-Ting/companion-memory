@@ -42,16 +42,16 @@ def main():
     folio.compress(db, "demo", NAMES)
 
     question = "阳台那盆薄荷要多久浇一次水来着？"
-    # demo 里直接拿日总结的向量当检索后端；真实环境可以换成任何能给出 相似度+排名 的记忆库
-    candidates = day_summary.search(db, question, k=5, min_sim=0)
-    accepted = recall_gate.gate(question, candidates, noise=NAMES.values())
+    # demo 里直接拿日总结的向量当检索后端；真实环境可以换成任何能给出排名的记忆库
+    candidates = day_summary.search(db, question, k=12, min_sim=0)
+    accepted, ok = recall_gate.pick(question, candidates, NAMES, prev="对，过两周可以掐尖。")
     for c in candidates:
         print(f'{c["fate"]:>18}  {c["sim"]:.2f}  {c["text"][:40]}')
 
     msgs, breakpoints = layout.build(
         Path(__file__).with_name("prompt.md").read_text(),
         folio.context(db, "demo"),
-        [recall_gate.render(accepted)],
+        [recall_gate.render(accepted, unavailable=not ok)],
         question,
     )
     print("\n—— 发给模型的请求 ——")
